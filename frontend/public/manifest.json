@@ -1,0 +1,18 @@
+{
+  "name": "SignWatch",
+  "short_name": "SignWatch",
+  "description": "Crowdsourced road sign monitoring",
+  "start_url": "/",
+  "display": "fullscreen",
+  "orientation": "portrait",
+  "background_color": "#0f172a",
+  "theme_color": "#0f172a",
+  "icons": [
+    {
+      "src": "/favicon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}

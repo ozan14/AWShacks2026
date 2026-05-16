@@ -1,0 +1,80 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: SignWatch backend
+
+Globals:
+  Function:
+    Timeout: 30
+    Runtime: python3.12
+    Environment:
+      Variables:
+        FLAGS_TABLE: !Ref FlagsTable
+        S3_BUCKET: signwatch-frames-ozant
+        MODEL_ID: anthropic.claude-3-5-sonnet-20241022-v2:0
+
+Resources:
+
+  # DynamoDB table for flagged signs
+  # SimpleTable with id (hash key) = session_id#timestamp
+  FlagsTable:
+    Type: AWS::Serverless::SimpleTable
+    Properties:
+      TableName: signwatch-flags
+
+  # Lambda: triggered by S3 upload, calls Bedrock, writes flag
+  AnalyzeFrameFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: lambdas/analyze-frame/
+      Handler: handler.lambda_handler
+      Policies:
+        - S3ReadPolicy:
+            BucketName: signwatch-frames-ozant
+        - DynamoDBWritePolicy:
+            TableName: !Ref FlagsTable
+        - Statement:
+            Effect: Allow
+            Action: bedrock:InvokeModel
+            Resource: "*"
+      Events:
+        S3Upload:
+          Type: S3
+          Properties:
+            Bucket: !Ref FramesBucket
+            Events: s3:ObjectCreated:*
+
+  # S3 bucket for frames (SAM manages it)
+  FramesBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: signwatch-frames-ozant
+      CorsConfiguration:
+        CorsRules:
+          - AllowedOrigins: ["*"]
+            AllowedMethods: [GET, PUT]
+            AllowedHeaders: ["*"]
+            MaxAge: 3000
+
+  # Lambda: returns flags for review screen
+  GetFlagsFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: lambdas/get-flags/
+      Handler: handler.lambda_handler
+      Policies:
+        - DynamoDBReadPolicy:
+            TableName: !Ref FlagsTable
+      Events:
+        Api:
+          Type: Api
+          Properties:
+            Path: /flags
+            Method: get
+
+Outputs:
+  ApiUrl:
+    Description: API Gateway URL
+    Value: !Sub "https://${ServerlessRestApi}.execute-api.${AWS::Region}.amazonaws.com/Prod"
+  FramesBucket:
+    Description: S3 bucket for frames
+    Value: !Ref FramesBucket

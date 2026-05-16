@@ -1,0 +1,17 @@
+{
+  "name": "King County",
+  "source_id": "king_county",
+  "api_url": "https://gismaps.kingcounty.gov/arcgis/rest/services/Roads/KingCo_Roads/MapServer/2",
+  "api_type": "MapServer",
+  "batch_size": 1000,
+  "where_clause": "SignClass IN ('Regulatory', 'Warning')",
+  "geometry_mode": "geometry",
+  "out_sr": 4326,
+  "fields": {
+    "id": "OBJECTID",
+    "sign_type": "Description",
+    "category": "SignClass",
+    "description": "RoadName"
+  },
+  "report_url": "https://kingcounty.gov/en/dept/dot/roads/report-road-problem"
+}

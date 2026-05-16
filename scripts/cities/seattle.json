@@ -1,0 +1,18 @@
+{
+  "name": "Seattle",
+  "source_id": "seattle",
+  "api_url": "https://services.arcgis.com/ZOyb2t4B0UYuYNYH/arcgis/rest/services/SDOT_Street_Signs/FeatureServer/1",
+  "api_type": "FeatureServer",
+  "batch_size": 2000,
+  "where_clause": "CATEGORY IN ('REGBP','REGSL','REGTP','REGWL','REGMIS','WARNCW','WARNS','WARNH','WARNTC','WARNCU')",
+  "geometry_mode": "fields",
+  "lat_field": "SHAPE_LAT",
+  "lng_field": "SHAPE_LNG",
+  "fields": {
+    "id": "OBJECTID",
+    "sign_type": "SIGNTYPE",
+    "category": "CATEGORY",
+    "description": "UNITDESC"
+  },
+  "report_url": "https://apps.seattle.gov/CustomerService/serviceRequestForm/?serviceType=ROAD_SIGN"
+}
