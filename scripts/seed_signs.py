@@ -1,100 +1,113 @@
+"""
+Generic seed runner — loads all city configs from scripts/cities/*.json
+and uploads a merged signs-latest.json to S3.
+
+To add a new city: run discover_city.py to generate a config, then rerun this script.
+"""
 import boto3
 import requests
 import json
 import time
+from pathlib import Path
 
 BUCKET = "signwatch-frames-ozant"
 REGION = "us-west-2"
 S3_KEY = "signs-latest.json"
-
-# Seattle SDOT ---------------------------------------------------------------
-
-SDOT_URL = (
-    "https://services.arcgis.com/ZOyb2t4B0UYuYNYH/arcgis/rest"
-    "/services/SDOT_Street_Signs/FeatureServer/1/query"
-)
-
-SDOT_CATEGORIES = {
-    "REGBP", "REGSL", "REGTP", "REGWL", "REGMIS",  # regulatory
-    "WARNCW", "WARNS", "WARNH", "WARNTC", "WARNCU", # warning
-}
+CITIES_DIR = Path(__file__).parent / "cities"
 
 
-def fetch_seattle_signs():
+def fetch_city_signs_socrata(config):
+    domain = config["domain"]
+    dataset_id = config["dataset_id"]
+    where = config.get("where_clause", "")
+    field_map = config["fields"]
+    source_id = config["source_id"]
+    lat_field = config["lat_field"]
+    lng_field = config["lng_field"]
+
     signs = []
     offset = 0
-    batch = 2000
-    print("Fetching Seattle SDOT signs...")
+    batch = 5000
+    print(f"\nFetching {config['name']} (Socrata)...")
 
     while True:
-        params = {
-            "where": "1=1",
-            "outFields": "OBJECTID,SIGNTYPE,CATEGORY,UNITDESC,SHAPE_LAT,SHAPE_LNG",
-            "f": "json",
-            "resultOffset": offset,
-            "resultRecordCount": batch,
-        }
-        data = requests.get(SDOT_URL, params=params).json()
-        features = data.get("features", [])
-        if not features:
+        params = {"$limit": batch, "$offset": offset}
+        if where:
+            params["$where"] = where
+        resp = requests.get(f"https://{domain}/resource/{dataset_id}.json", params=params, timeout=30)
+        records = resp.json()
+
+        if not records or (isinstance(records, dict) and "error" in records):
             break
 
-        for f in features:
-            a = f["attributes"]
-            if a.get("CATEGORY") not in SDOT_CATEGORIES:
+        for r in records:
+            try:
+                lat = float(r.get(lat_field) or 0)
+                lng = float(r.get(lng_field) or 0)
+            except (ValueError, TypeError):
                 continue
-            lat, lng = a.get("SHAPE_LAT"), a.get("SHAPE_LNG")
             if not lat or not lng:
                 continue
             signs.append({
-                "id": f"sdot_{a['OBJECTID']}",
-                "sign_type": a.get("SIGNTYPE") or "",
-                "category": a.get("CATEGORY") or "",
-                "description": a.get("UNITDESC") or "",
+                "id": f"{source_id}_{r.get(field_map['id'], offset)}",
+                "sign_type": r.get(field_map["sign_type"]) or "",
+                "category": r.get(field_map["category"]) or "",
+                "description": r.get(field_map["description"]) or "",
                 "lat": lat,
                 "lng": lng,
-                "source": "seattle",
+                "source": source_id,
             })
 
         offset += batch
-        print(f"  Seattle: {offset} records scanned, {len(signs)} kept")
+        print(f"  {offset} records fetched, {len(signs)} kept")
         time.sleep(0.2)
 
-    print(f"  Seattle total: {len(signs)} signs")
+        if len(records) < batch:
+            break
+
+    print(f"  Done: {len(signs)} signs from {config['name']}")
     return signs
 
 
-# King County (Redmond, Kirkland, unincorporated) ----------------------------
+def fetch_city_signs(config):
+    name = config["name"]
+    url = config["api_url"]
+    batch = config.get("batch_size", 2000)
+    where = config.get("where_clause", "1=1")
+    geo_mode = config.get("geometry_mode", "fields")
+    field_map = config["fields"]
+    source_id = config["source_id"]
 
-KC_URL = (
-    "https://gismaps.kingcounty.gov/arcgis/rest/services"
-    "/Roads/KingCo_Roads/MapServer/2/query"
-)
+    out_fields = ",".join([
+        field_map["id"],
+        field_map["sign_type"],
+        field_map["category"],
+        field_map["description"],
+    ])
+    if geo_mode == "fields":
+        out_fields += f",{config['lat_field']},{config['lng_field']}"
 
-KC_SIGN_CLASSES = {"Regulatory", "Warning"}
-
-
-def fetch_king_county_signs():
     signs = []
     offset = 0
-    batch = 1000  # King County MapServer max record count
-    print("Fetching King County signs (Redmond, Kirkland, etc.)...")
+    print(f"\nFetching {name}...")
 
     while True:
         params = {
-            "where": "SignClass IN ('Regulatory', 'Warning')",
-            "outFields": "OBJECTID,MUTCDCode,Description,SignClass,RoadName",
-            "returnGeometry": "true",
-            "outSR": "4326",        # returns geometry as WGS84 lng/lat
+            "where": where,
+            "outFields": out_fields,
+            "returnGeometry": "true" if geo_mode == "geometry" else "false",
             "f": "json",
             "resultOffset": offset,
             "resultRecordCount": batch,
         }
-        resp = requests.get(KC_URL, params=params)
+        if geo_mode == "geometry":
+            params["outSR"] = config.get("out_sr", 4326)
+
+        resp = requests.get(f"{url}/query", params=params, timeout=30)
         data = resp.json()
 
         if "error" in data:
-            print(f"  King County API error: {data['error']}")
+            print(f"  API error: {data['error']}")
             break
 
         features = data.get("features", [])
@@ -103,52 +116,66 @@ def fetch_king_county_signs():
 
         for f in features:
             a = f["attributes"]
-            geom = f.get("geometry") or {}
-            lng = geom.get("x")
-            lat = geom.get("y")
+
+            if geo_mode == "fields":
+                lat = a.get(config["lat_field"])
+                lng = a.get(config["lng_field"])
+            else:
+                geom = f.get("geometry") or {}
+                lat = geom.get("y")
+                lng = geom.get("x")
+
             if not lat or not lng:
                 continue
-            road = a.get("RoadName") or ""
-            desc = a.get("Description") or ""
+
             signs.append({
-                "id": f"kc_{a['OBJECTID']}",
-                "sign_type": desc or a.get("MUTCDCode") or "",
-                "category": a.get("SignClass") or "",
-                "description": f"{a.get('MUTCDCode') or ''} — {road}".strip(" —"),
+                "id": f"{source_id}_{a[field_map['id']]}",
+                "sign_type": a.get(field_map["sign_type"]) or "",
+                "category": a.get(field_map["category"]) or "",
+                "description": a.get(field_map["description"]) or "",
                 "lat": lat,
                 "lng": lng,
-                "source": "king_county",
+                "source": source_id,
             })
 
         offset += batch
-        print(f"  King County: {offset} records fetched, {len(signs)} kept")
+        print(f"  {offset} records fetched, {len(signs)} kept")
         time.sleep(0.2)
 
         if not data.get("exceededTransferLimit", False):
             break
 
-    print(f"  King County total: {len(signs)} signs")
+    print(f"  Done: {len(signs)} signs from {name}")
     return signs
 
-
-# Upload ---------------------------------------------------------------------
 
 def upload_to_s3(signs):
     print(f"\nUploading {len(signs)} total signs to S3...")
     s3 = boto3.client("s3", region_name=REGION)
     body = json.dumps(signs, separators=(",", ":"))
-    s3.put_object(
-        Bucket=BUCKET,
-        Key=S3_KEY,
-        Body=body,
-        ContentType="application/json",
-    )
+    s3.put_object(Bucket=BUCKET, Key=S3_KEY, Body=body, ContentType="application/json")
     print(f"Done — {len(body) / 1024:.0f} KB at s3://{BUCKET}/{S3_KEY}")
 
 
 if __name__ == "__main__":
-    seattle = fetch_seattle_signs()
-    king_county = fetch_king_county_signs()
-    all_signs = seattle + king_county
-    print(f"\nTotal: {len(all_signs)} signs ({len(seattle)} Seattle + {len(king_county)} King County)")
+    configs = sorted(CITIES_DIR.glob("*.json"))
+    if not configs:
+        print(f"No city configs found in {CITIES_DIR}/")
+        exit(1)
+
+    print(f"Loading {len(configs)} city config(s): {[c.stem for c in configs]}")
+
+    all_signs = []
+    for config_path in configs:
+        config = json.loads(config_path.read_text())
+        if config.get("api_type") == "Socrata":
+            all_signs.extend(fetch_city_signs_socrata(config))
+        else:
+            all_signs.extend(fetch_city_signs(config))
+
+    by_source = {}
+    for s in all_signs:
+        by_source[s["source"]] = by_source.get(s["source"], 0) + 1
+    print(f"\nTotal: {len(all_signs)} signs — {by_source}")
+
     upload_to_s3(all_signs)

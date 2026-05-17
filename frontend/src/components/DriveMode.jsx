@@ -15,20 +15,27 @@ export default function DriveMode({ onSwitchToReview }) {
   }, [])
 
   const handleSignNearby = useCallback(async (sign) => {
-    const frame = captureFrame()
-    if (!frame) return
+    const BURST_COUNT = 3
+    const BURST_DELAY_MS = 2000
 
-    try {
-      await uploadFrame(frame, sign, getSessionId())
-      setCaptureCount(c => c + 1)
+    for (let i = 0; i < BURST_COUNT; i++) {
+      if (i > 0) await new Promise(r => setTimeout(r, BURST_DELAY_MS))
 
-      const dot = document.getElementById('capture-dot')
-      if (dot) {
-        dot.style.background = '#22c55e'
-        setTimeout(() => dot.style.background = '#3b82f6', 500)
+      const frame = captureFrame()
+      if (!frame) continue
+
+      try {
+        await uploadFrame(frame, sign, getSessionId())
+        setCaptureCount(c => c + 1)
+
+        const dot = document.getElementById('capture-dot')
+        if (dot) {
+          dot.style.background = '#22c55e'
+          setTimeout(() => dot.style.background = '#3b82f6', 500)
+        }
+      } catch (err) {
+        console.error('Upload failed:', err)
       }
-    } catch (err) {
-      console.error('Upload failed:', err)
     }
   }, [captureFrame])
 

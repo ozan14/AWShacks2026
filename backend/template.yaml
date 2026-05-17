@@ -10,7 +10,7 @@ Globals:
       Variables:
         FLAGS_TABLE: !Ref FlagsTable
         S3_BUCKET: signwatch-frames-ozant
-        MODEL_ID: anthropic.claude-3-5-sonnet-20241022-v2:0
+        MODEL_ID: us.anthropic.claude-sonnet-4-6
 
 Resources:
 
@@ -36,6 +36,7 @@ Resources:
             Effect: Allow
             Action: bedrock:InvokeModel
             Resource: "*"
+      ReservedConcurrentExecutions: 10
       Events:
         S3Upload:
           Type: S3

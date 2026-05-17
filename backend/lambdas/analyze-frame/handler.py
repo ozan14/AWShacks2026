@@ -9,7 +9,7 @@ s3 = boto3.client('s3')
 dynamodb = boto3.resource('dynamodb')
 
 FLAGS_TABLE = os.environ['FLAGS_TABLE']
-MODEL_ID = os.environ.get('MODEL_ID', 'anthropic.claude-3-5-sonnet-20241022-v2:0')
+MODEL_ID = os.environ.get('MODEL_ID', 'us.anthropic.claude-sonnet-4-6')
 
 PROMPT = """You are analyzing a dashcam frame captured while a car was driving.
 

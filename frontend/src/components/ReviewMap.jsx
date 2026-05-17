@@ -6,8 +6,27 @@ import FlagDetail from './FlagDetail'
 import { getSessionId } from '../utils/uploadFrame'
 
 const API_URL = import.meta.env.VITE_API_URL
-
 const SEATTLE_CENTER = [47.6062, -122.3321]
+
+const VERDICT_SEVERITY = { MISSING: 2, OBSCURED: 1, UNCLEAR: 0, CLEAR: -1 }
+
+function groupBySign(flags) {
+  const groups = {}
+  for (const flag of flags) {
+    const key = flag.sign_id || `${flag.lat}_${flag.lng}`
+    if (!groups[key]) {
+      groups[key] = { ...flag, captures: [flag] }
+    } else {
+      groups[key].captures.push(flag)
+      // Promote the group's verdict to the worst seen
+      if ((VERDICT_SEVERITY[flag.verdict] || 0) > (VERDICT_SEVERITY[groups[key].verdict] || 0)) {
+        groups[key].verdict = flag.verdict
+        groups[key].reason = flag.reason
+      }
+    }
+  }
+  return Object.values(groups)
+}
 
 function createIcon(verdict) {
   const color = verdict === 'MISSING' ? '#ef4444' : '#f59e0b'
@@ -39,7 +58,7 @@ export default function ReviewMap({ onBack, onNewDrive }) {
     fetch(`${API_URL}/flags?session_id=${encodeURIComponent(sessionId)}`)
       .then(r => r.json())
       .then(data => {
-        setFlags(Array.isArray(data) ? data : [])
+        setFlags(groupBySign(Array.isArray(data) ? data : []))
         setLoading(false)
       })
       .catch(() => setLoading(false))
